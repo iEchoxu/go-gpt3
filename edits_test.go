@@ -1,9 +1,6 @@
-package gogpt_test
+package openai_test
 
 import (
-	. "github.com/sashabaranov/go-gpt3"
-	"github.com/sashabaranov/go-gpt3/internal/test"
-
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,25 +8,19 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/sashabaranov/go-openai"
+	"github.com/sashabaranov/go-openai/internal/test/checks"
 )
 
 // TestEdits Tests the edits endpoint of the API using the mocked server.
 func TestEdits(t *testing.T) {
-	server := test.NewTestServer()
+	client, server, teardown := setupOpenAITestServer()
+	defer teardown()
 	server.RegisterHandler("/v1/edits", handleEditEndpoint)
-	// create the test server
-	var err error
-	ts := server.OpenAITestServer()
-	ts.Start()
-	defer ts.Close()
-
-	client := NewClient(test.GetTestToken())
-	ctx := context.Background()
-	client.BaseURL = ts.URL + "/v1"
-
 	// create an edit request
 	model := "ada"
-	editReq := EditsRequest{
+	editReq := openai.EditsRequest{
 		Model: &model,
 		Input: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, " +
 			"sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim" +
@@ -38,10 +29,8 @@ func TestEdits(t *testing.T) {
 		Instruction: "test instruction",
 		N:           3,
 	}
-	response, err := client.Edits(ctx, editReq)
-	if err != nil {
-		t.Fatalf("Edits error: %v", err)
-	}
+	response, err := client.Edits(context.Background(), editReq)
+	checks.NoError(t, err, "Edits error")
 	if len(response.Choices) != editReq.N {
 		t.Fatalf("edits does not properly return the correct number of choices")
 	}
@@ -56,14 +45,14 @@ func handleEditEndpoint(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
-	var editReq EditsRequest
+	var editReq openai.EditsRequest
 	editReq, err = getEditBody(r)
 	if err != nil {
 		http.Error(w, "could not read request", http.StatusInternalServerError)
 		return
 	}
 	// create a response
-	res := EditsResponse{
+	res := openai.EditsResponse{
 		Object:  "test-object",
 		Created: time.Now().Unix(),
 	}
@@ -73,12 +62,12 @@ func handleEditEndpoint(w http.ResponseWriter, r *http.Request) {
 	completionTokens := int(float32(len(editString))/4) * editReq.N
 	for i := 0; i < editReq.N; i++ {
 		// instruction will be hidden and only seen by OpenAI
-		res.Choices = append(res.Choices, EditsChoice{
+		res.Choices = append(res.Choices, openai.EditsChoice{
 			Text:  editReq.Input + editString,
 			Index: i,
 		})
 	}
-	res.Usage = Usage{
+	res.Usage = openai.Usage{
 		PromptTokens:     inputTokens,
 		CompletionTokens: completionTokens,
 		TotalTokens:      inputTokens + completionTokens,
@@ -88,16 +77,16 @@ func handleEditEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 // getEditBody Returns the body of the request to create an edit.
-func getEditBody(r *http.Request) (EditsRequest, error) {
-	edit := EditsRequest{}
+func getEditBody(r *http.Request) (openai.EditsRequest, error) {
+	edit := openai.EditsRequest{}
 	// read the request body
 	reqBody, err := io.ReadAll(r.Body)
 	if err != nil {
-		return EditsRequest{}, err
+		return openai.EditsRequest{}, err
 	}
 	err = json.Unmarshal(reqBody, &edit)
 	if err != nil {
-		return EditsRequest{}, err
+		return openai.EditsRequest{}, err
 	}
 	return edit, nil
 }

@@ -1,4 +1,4 @@
-package gogpt
+package openai
 
 import (
 	"context"
@@ -12,22 +12,25 @@ type Engine struct {
 	Object string `json:"object"`
 	Owner  string `json:"owner"`
 	Ready  bool   `json:"ready"`
+
+	httpHeader
 }
 
 // EnginesList is a list of engines.
 type EnginesList struct {
 	Engines []Engine `json:"data"`
+
+	httpHeader
 }
 
 // ListEngines Lists the currently available engines, and provides basic
 // information about each option such as the owner and availability.
 func (c *Client) ListEngines(ctx context.Context) (engines EnginesList, err error) {
-	req, err := http.NewRequest("GET", c.fullURL("/engines"), nil)
+	req, err := c.newRequest(ctx, http.MethodGet, c.fullURL("/engines"))
 	if err != nil {
 		return
 	}
 
-	req = req.WithContext(ctx)
 	err = c.sendRequest(req, &engines)
 	return
 }
@@ -39,12 +42,11 @@ func (c *Client) GetEngine(
 	engineID string,
 ) (engine Engine, err error) {
 	urlSuffix := fmt.Sprintf("/engines/%s", engineID)
-	req, err := http.NewRequest("GET", c.fullURL(urlSuffix), nil)
+	req, err := c.newRequest(ctx, http.MethodGet, c.fullURL(urlSuffix))
 	if err != nil {
 		return
 	}
 
-	req = req.WithContext(ctx)
 	err = c.sendRequest(req, &engine)
 	return
 }

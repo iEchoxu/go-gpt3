@@ -1,60 +1,16 @@
-package gogpt
+package openai
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"net/http"
 )
 
 var (
-	emptyMessagesLimit            = 300
 	ErrTooManyEmptyStreamMessages = errors.New("stream has sent too many empty messages")
 )
 
 type CompletionStream struct {
-	reader   *bufio.Reader
-	response *http.Response
-}
-
-func (stream *CompletionStream) Recv() (response CompletionResponse, err error) {
-	emptyMessagesCount := 0
-
-waitForData:
-	line, err := stream.reader.ReadBytes('\n')
-	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return
-		}
-	}
-
-	var headerData = []byte("data: ")
-	line = bytes.TrimSpace(line)
-	if !bytes.HasPrefix(line, headerData) {
-		emptyMessagesCount++
-		if emptyMessagesCount > emptyMessagesLimit {
-			err = ErrTooManyEmptyStreamMessages
-			return
-		}
-
-		goto waitForData
-	}
-
-	line = bytes.TrimPrefix(line, headerData)
-	if string(line) == "[DONE]" {
-		return
-	}
-
-	err = json.Unmarshal(line, &response)
-	return
-}
-
-func (stream *CompletionStream) Close() {
-	stream.response.Body.Close()
+	*streamReader[CompletionResponse]
 }
 
 // CreateCompletionStream — API call to create a completion w/ streaming
@@ -65,32 +21,29 @@ func (c *Client) CreateCompletionStream(
 	ctx context.Context,
 	request CompletionRequest,
 ) (stream *CompletionStream, err error) {
-	request.Stream = true
-	reqBytes, err := json.Marshal(request)
-	if err != nil {
-		return
-	}
-
 	urlSuffix := "/completions"
-	req, err := http.NewRequest("POST", c.fullURL(urlSuffix), bytes.NewBuffer(reqBytes))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Cache-Control", "no-cache")
-	req.Header.Set("Connection", "keep-alive")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.authToken))
-	if err != nil {
+	if !checkEndpointSupportsModel(urlSuffix, request.Model) {
+		err = ErrCompletionUnsupportedModel
 		return
 	}
 
-	req = req.WithContext(ctx)
-	resp, err := c.HTTPClient.Do(req) //nolint:bodyclose // body is closed in stream.Close()
-	if err != nil {
+	if !checkPromptType(request.Prompt) {
+		err = ErrCompletionRequestPromptTypeNotSupported
 		return
 	}
 
+	request.Stream = true
+	req, err := c.newRequest(ctx, "POST", c.fullURL(urlSuffix, request.Model), withBody(request))
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := sendRequestStream[CompletionResponse](c, req)
+	if err != nil {
+		return
+	}
 	stream = &CompletionStream{
-		reader:   bufio.NewReader(resp.Body),
-		response: resp,
+		streamReader: resp,
 	}
 	return
 }
